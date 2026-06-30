@@ -2,18 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { AsciiLabSettings } from '../types';
 
-// Google Drive model mappings
-export const GOOGLE_DRIVE_MODELS = {
-  printer: { name: 'Autofiber-5.stl', id: '1YoBFTqAvspC2-WUYGnhfklmDLyXDcgZz' },
-  extruder: { name: 'ACSE2Remeshed1.stl', id: '1hyBYQ9s6OgEhkPQUnWM3yV7r6lzYuTmb' },
-  drone: { name: 'Rabbit80.stl', id: '1oMcvYqzaKpStGJWFFvlPd2y4eLTJeubE' },
-  airplane: { name: 'Forceps600.stl', id: '1Flp7dsXqb52AgOcDf1ok84zeKihIK9hx' },
-  roboticArm: { name: 'KM1200.stl', id: '1ATJ4t3wflkSiR4KDKsiotyFMItKKt2KY' },
-  cycloidalGear: { name: 'CRV25.stl', id: '1WPees4-ni59QVjnxLG8ykV1gKDzkRAIf' }
+// STL files are served only from the public asset directory.
+export const PUBLIC_STL_MODELS = {
+  printer: { name: 'Autofiber-5.stl', path: '/models/Autofiber-5.stl' },
+  extruder: { name: 'ACSE2Remeshed1.stl', path: '/models/ACSE2Remeshed1.stl' },
+  drone: { name: 'Rabbit80.stl', path: '/models/Rabbit80.stl' },
+  airplane: { name: 'Forceps600.stl', path: '/models/Forceps600.stl' },
+  roboticArm: { name: 'KM1200.stl', path: '/models/KM1200.stl' },
+  cycloidalGear: { name: 'CRV25.stl', path: '/models/CRV25.stl' }
 };
 
 // Global cache for STL model ArrayBuffers
-const driveModelCache: Record<string, ArrayBuffer> = {};
+const publicModelCache: Record<string, ArrayBuffer> = {};
 
 // Custom drop-in replacement for AsciiEffect that forces transparency on alpha === 0
 class TransparentAsciiEffect {
@@ -182,52 +182,44 @@ export default function AsciiRenderer({
     };
   }, []);
 
-  // Dynamic Google Drive model loader using high-performance CORS proxies
+  // Dynamic public asset model loader.
   useEffect(() => {
-    const driveModelInfo = GOOGLE_DRIVE_MODELS[settings.modelType as keyof typeof GOOGLE_DRIVE_MODELS];
-    if (!driveModelInfo) return;
+    const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
+    if (!publicModelInfo) return;
 
-    const fileId = driveModelInfo.id;
-    if (driveModelCache[fileId] || localCache[fileId]) return;
+    const modelPath = publicModelInfo.path;
+    if (publicModelCache[modelPath] || localCache[modelPath]) return;
 
     let isMounted = true;
     setLoadingModel(settings.modelType);
 
     const fetchModel = async () => {
-      const urls = [
-        `/api/drive-proxy?id=${fileId}`,
-        `/models/${driveModelInfo.name}`,
-        `https://docs.google.com/uc?export=download&id=${fileId}`,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://docs.google.com/uc?export=download&id=${fileId}`)}`
-      ];
-
-      for (const url of urls) {
-        try {
-          const res = await fetch(url);
-          if (!res.ok) continue;
-          const buffer = await res.arrayBuffer();
-          if (buffer.byteLength < 500) continue;
-
-          // Double check that it's not a generic sign-in or error HTML page
-          const header = new TextDecoder().decode(buffer.slice(0, 50));
-          if (header.includes('<html') || header.includes('<!DOCTYPE') || header.includes('<HTML')) {
-            continue;
-          }
-
-          if (isMounted) {
-            driveModelCache[fileId] = buffer;
-            setLocalCache(prev => ({ ...prev, [fileId]: buffer }));
-            setLoadingModel(null);
-            return;
-          }
-        } catch (e) {
-          console.warn(`CORS proxy fallback failed for url: ${url}`, e);
+      try {
+        const res = await fetch(modelPath);
+        if (!res.ok) {
+          throw new Error(`Failed to load ${modelPath}: ${res.status} ${res.statusText}`);
         }
-      }
 
-      // If all fallbacks failed, stop loading to allow procedural model to render
-      if (isMounted) {
-        setLoadingModel(null);
+        const buffer = await res.arrayBuffer();
+        if (buffer.byteLength < 500) {
+          throw new Error(`Failed to load ${modelPath}: file is too small to be a valid STL.`);
+        }
+
+        const header = new TextDecoder().decode(buffer.slice(0, 50));
+        if (header.includes('<html') || header.includes('<!DOCTYPE') || header.includes('<HTML')) {
+          throw new Error(`Failed to load ${modelPath}: received HTML instead of STL data.`);
+        }
+
+        if (isMounted) {
+          publicModelCache[modelPath] = buffer;
+          setLocalCache(prev => ({ ...prev, [modelPath]: buffer }));
+          setLoadingModel(null);
+        }
+      } catch (e) {
+        console.warn(`Public STL asset failed to load: ${modelPath}`, e);
+        if (isMounted) {
+          setLoadingModel(null);
+        }
       }
     };
 
@@ -289,11 +281,11 @@ export default function AsciiRenderer({
 
     let currentObject: THREE.Object3D = new THREE.Group();
 
-    // Determine target buffer (either user manual file upload or loaded Google Drive file)
+    // Determine target buffer (either user manual file upload or loaded public STL file)
     let activeStlBuffer = customStlBuffer;
-    const driveModelInfo = GOOGLE_DRIVE_MODELS[settings.modelType as keyof typeof GOOGLE_DRIVE_MODELS];
-    if (driveModelInfo && (driveModelCache[driveModelInfo.id] || localCache[driveModelInfo.id])) {
-      activeStlBuffer = driveModelCache[driveModelInfo.id] || localCache[driveModelInfo.id];
+    const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
+    if (publicModelInfo && (publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path])) {
+      activeStlBuffer = publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path];
     }
 
     let parsedSuccessfully = false;
@@ -888,20 +880,20 @@ export default function AsciiRenderer({
     return geometry;
   }
 
-  // Display downloading status for the Google Drive dynamic loading flow
+  // Display loading status for the public asset dynamic loading flow
   if (loadingModel === settings.modelType) {
-    const driveModelInfo = GOOGLE_DRIVE_MODELS[settings.modelType as keyof typeof GOOGLE_DRIVE_MODELS];
+    const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
     return (
       <div className={`w-full max-w-[460px] aspect-square flex flex-col items-center justify-center text-xs animate-pulse ${className}`}>
-        <div className="text-current opacity-70 font-mono tracking-wider">DOWNLOADING HIGH-FIDELITY MODEL...</div>
-        <div className="text-[10px] text-neutral-500 font-mono mt-1">Fetching from Google Drive ({driveModelInfo?.name})</div>
+        <div className="text-current opacity-70 font-mono tracking-wider">LOADING HIGH-FIDELITY MODEL...</div>
+        <div className="text-[10px] text-neutral-500 font-mono mt-1">Fetching public asset ({publicModelInfo?.name})</div>
       </div>
     );
   }
 
   // Fallback rendering condition for Drone in minimalist preview modes when STL data is not fully fetched yet
-  const driveModelInfo = GOOGLE_DRIVE_MODELS[settings.modelType as keyof typeof GOOGLE_DRIVE_MODELS];
-  const hasStl = customStlBuffer || (driveModelInfo && (driveModelCache[driveModelInfo.id] || localCache[driveModelInfo.id]));
+  const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
+  const hasStl = customStlBuffer || (publicModelInfo && (publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path]));
   if (settings.modelType === 'drone' && !hasStl) {
     return <div className="w-full max-w-[460px] aspect-square bg-transparent" />;
   }
