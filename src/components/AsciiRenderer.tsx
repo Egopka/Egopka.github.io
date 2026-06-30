@@ -159,6 +159,7 @@ export default function AsciiRenderer({
   const mountRef = useRef<HTMLDivElement>(null);
   const [localCache, setLocalCache] = useState<Record<string, ArrayBuffer>>({});
   const [loadingModel, setLoadingModel] = useState<string | null>(null);
+  const [failedModel, setFailedModel] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 460, height: 460 });
 
   // Dynamic ResizeObserver to scale container dynamically to the actual viewport without stretching
@@ -192,6 +193,7 @@ export default function AsciiRenderer({
 
     let isMounted = true;
     setLoadingModel(settings.modelType);
+    setFailedModel(null);
 
     const fetchModel = async () => {
       try {
@@ -214,11 +216,13 @@ export default function AsciiRenderer({
           publicModelCache[modelPath] = buffer;
           setLocalCache(prev => ({ ...prev, [modelPath]: buffer }));
           setLoadingModel(null);
+          setFailedModel(null);
         }
       } catch (e) {
         console.warn(`Public STL asset failed to load: ${modelPath}`, e);
         if (isMounted) {
           setLoadingModel(null);
+          setFailedModel(settings.modelType);
         }
       }
     };
@@ -232,6 +236,15 @@ export default function AsciiRenderer({
 
   useEffect(() => {
     if (!mountRef.current) return;
+
+    const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
+    const publicModelBuffer = publicModelInfo
+      ? publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path]
+      : null;
+
+    if (publicModelInfo && !customStlBuffer && !publicModelBuffer) {
+      return;
+    }
 
     // Sizing dynamically fetched from ResizeObserver
     const width = dimensions.width;
@@ -283,9 +296,8 @@ export default function AsciiRenderer({
 
     // Determine target buffer (either user manual file upload or loaded public STL file)
     let activeStlBuffer = customStlBuffer;
-    const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
-    if (publicModelInfo && (publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path])) {
-      activeStlBuffer = publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path];
+    if (publicModelInfo && publicModelBuffer) {
+      activeStlBuffer = publicModelBuffer;
     }
 
     let parsedSuccessfully = false;
@@ -881,8 +893,19 @@ export default function AsciiRenderer({
   }
 
   // Display loading status for the public asset dynamic loading flow
-  if (loadingModel === settings.modelType) {
-    const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
+  const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
+  const hasStl = customStlBuffer || (publicModelInfo && (publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path]));
+
+  if (failedModel === settings.modelType && publicModelInfo && !hasStl) {
+    return (
+      <div className={`w-full max-w-[460px] aspect-square flex flex-col items-center justify-center text-xs ${className}`}>
+        <div className="text-current opacity-70 font-mono tracking-wider">MODEL ASSET UNAVAILABLE</div>
+        <div className="text-[10px] text-neutral-500 font-mono mt-1">{publicModelInfo.path}</div>
+      </div>
+    );
+  }
+
+  if ((loadingModel === settings.modelType || (publicModelInfo && !hasStl)) && publicModelInfo) {
     return (
       <div className={`w-full max-w-[460px] aspect-square flex flex-col items-center justify-center text-xs animate-pulse ${className}`}>
         <div className="text-current opacity-70 font-mono tracking-wider">LOADING HIGH-FIDELITY MODEL...</div>
@@ -892,8 +915,6 @@ export default function AsciiRenderer({
   }
 
   // Fallback rendering condition for Drone in minimalist preview modes when STL data is not fully fetched yet
-  const publicModelInfo = PUBLIC_STL_MODELS[settings.modelType as keyof typeof PUBLIC_STL_MODELS];
-  const hasStl = customStlBuffer || (publicModelInfo && (publicModelCache[publicModelInfo.path] || localCache[publicModelInfo.path]));
   if (settings.modelType === 'drone' && !hasStl) {
     return <div className="w-full max-w-[460px] aspect-square bg-transparent" />;
   }

@@ -101,7 +101,7 @@ export default function ProjectStage({ projectId, activeTheme }: ProjectStagePro
 
   // Construct the retro progress bar blocks (10 blocks total)
   const totalBlocks = 10;
-  const filledBlocksCount = Math.floor(progress / 10);
+  const filledBlocksCount = Math.min(totalBlocks, Math.max(0, Math.floor(progress / 10)));
   const emptyBlocksCount = totalBlocks - filledBlocksCount;
 
   const filledPart = '█'.repeat(filledBlocksCount);
