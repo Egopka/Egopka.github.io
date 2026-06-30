@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Engineering Portfolio TUI",
+  "description": "Interactive WebTUI engineering portfolio featuring an AndrewSink-inspired realtime 3D model to ASCII generator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
